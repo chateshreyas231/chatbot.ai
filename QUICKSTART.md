@@ -20,8 +20,14 @@ cp infra/env.example infra/.env
 
 # Edit infra/.env and add:
 # - MONGODB_URI (from MongoDB Atlas Connection String)
-# - OPENAI_API_KEY (from OpenAI dashboard)
+#   Location: infra/.env
+#   Format: mongodb+srv://username:password@cluster.mongodb.net/?appName=AIChatbot
+# - OPENAI_API_KEY (from OpenAI dashboard: https://platform.openai.com/api-keys)
+#   Location: infra/.env
+#   Key name: OPENAI_API_KEY
 ```
+
+**Note:** The `.env` file location is `infra/.env` - this is checked first by the API configuration.
 
 ## Step 2: Install Dependencies (3 min)
 

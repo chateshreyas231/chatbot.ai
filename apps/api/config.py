@@ -8,19 +8,23 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Try loading .env from infra/, apps/api/, and root
+# Priority: infra/.env > apps/api/.env > .env (root)
 base_dir = Path(__file__).parent.parent.parent
 env_files = [
-    base_dir / "infra" / ".env",
-    base_dir / "apps" / "api" / ".env",
-    base_dir / ".env",
+    base_dir / "infra" / ".env",  # Primary location
+    base_dir / "apps" / "api" / ".env",  # Fallback
+    base_dir / ".env",  # Root fallback
 ]
 
+env_loaded = False
 for env_file in env_files:
     if env_file.exists():
         load_dotenv(env_file)
+        env_loaded = True
         break
-else:
-    # Fallback to default .env loading
+
+if not env_loaded:
+    # Fallback to default .env loading (current directory)
     load_dotenv()
 
 
