@@ -12,8 +12,13 @@ connect.js
 secrets/
 *.key
 *.pem
-*credentials*
-*password*
+*credentials*.txt
+*credentials*.json
+*password*.txt
+*password*.json
+# Allow documentation files (exceptions)
+!ROTATE_CREDENTIALS.md
+!SECURITY.md
 
 # Python
 __pycache__/
