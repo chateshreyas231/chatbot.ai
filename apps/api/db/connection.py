@@ -70,4 +70,5 @@ async def close_database():
     """Close database connection."""
     if db.client:
         db.client.close()
+        db.database = None
 

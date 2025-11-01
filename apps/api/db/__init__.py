@@ -1,5 +1,5 @@
 """Database connection and utilities."""
-from .connection import get_database, init_database
+from .connection import get_database, init_database, close_database
 from .models import (
     User,
     Session,
@@ -14,6 +14,7 @@ from .models import (
 __all__ = [
     "get_database",
     "init_database",
+    "close_database",
     "User",
     "Session",
     "Message",

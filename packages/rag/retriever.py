@@ -123,8 +123,15 @@ _retriever = None
 async def retrieve_kb(query: str, k: int = 6) -> List[Dict[str, Any]]:
     """Convenience function to retrieve KB chunks."""
     global _retriever
-    if _retriever is None:
-        _retriever = VectorRetriever()
-    
-    return await _retriever.retrieve(query, k)
+    try:
+        if _retriever is None:
+            _retriever = VectorRetriever()
+        
+        return await _retriever.retrieve(query, k)
+    except Exception as e:
+        print(f"Error in retrieve_kb: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return empty list to trigger LLM fallback
+        return []
 

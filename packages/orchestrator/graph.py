@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
-from langchain.schema import HumanMessage, AIMessage
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
 import json
 
 # Add parent directories to path
@@ -14,7 +14,15 @@ from config import settings
 from db import get_database
 from db.models import AuditLog
 from packages.rag.retriever import retrieve_kb
-from packages.clients import TicketSystemAdapter, MockTicketClient, ServiceNowClient, JiraClient, M365Client, MockM365Client
+from packages.clients import TicketSystemAdapter, MockTicketClient, ServiceNowClient, MockM365Client
+try:
+    from packages.clients import M365Client
+except ImportError:
+    M365Client = None  # Optional (requires msal)
+try:
+    from packages.clients import JiraClient
+except ImportError:
+    JiraClient = None  # Optional
 from packages.orchestrator.prompts import (
     SYSTEM_PROMPT,
     get_classifier_prompt,
@@ -85,36 +93,150 @@ class ITHelpdeskOrchestrator:
     
     async def handle_knowledge(self, query: str, user_email: str) -> Dict[str, Any]:
         """Handle knowledge base queries."""
-        # Retrieve relevant chunks
-        chunks = await retrieve_kb(query, k=6)
+        try:
+            # Check if query is about movies (sample_mflix database)
+            movie_keywords = ["movie", "film", "actor", "director", "genre", "rating", "imdb", "plot", "cast"]
+            is_movie_query = any(keyword in query.lower() for keyword in movie_keywords)
+            
+            if is_movie_query:
+                # Use sample_mflix database
+                try:
+                    # Import MflixRetriever - need to add path
+                    from pathlib import Path as PathLib
+                    api_path = PathLib(__file__).parent.parent.parent / "apps" / "api"
+                    if str(api_path) not in sys.path:
+                        sys.path.insert(0, str(api_path))
+                    
+                    from packages.rag.mflix_retriever import MflixRetriever
+                    
+                    retriever = MflixRetriever()
+                    movies = await retriever.search_movies(query, limit=6)
+                    
+                    if movies:
+                        # Format movies for response
+                        movies_text = "\n\n".join([
+                            f"**{m['title']}** ({m.get('year', 'N/A')})\n"
+                            f"Genres: {', '.join(m.get('genres', []))}\n"
+                            f"Plot: {m.get('plot', 'N/A')[:200]}..."
+                            for m in movies
+                        ])
+                        
+                        prompt = f"""Based on the following movies from our database, answer the user's question about movies:
+
+{movies_text}
+
+User question: {query}
+
+Provide a helpful answer about these movies."""
+                        
+                        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                        answer = response.content.strip()
+                        
+                        return {
+                            "answer": answer,
+                            "sources": [{"title": m["title"], "year": m.get("year")} for m in movies],
+                            "intent": "knowledge",
+                            "data_source": "sample_mflix"
+                        }
+                except Exception as e:
+                    print(f"Error retrieving from sample_mflix: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Fall through to KB retrieval or generic LLM
+        except Exception as e:
+            print(f"Error in handle_knowledge: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fall through to generic LLM
+        
+        # Fallback to KB retrieval - wrap in try-catch to handle errors
+        chunks = []
+        try:
+            chunks = await retrieve_kb(query, k=6)
+        except Exception as e:
+            print(f"Error retrieving from KB: {e}")
+            chunks = []  # Empty chunks will trigger LLM fallback
         
         # Log retrieval
         if settings.enable_audit_logs:
-            await self._log_audit("rag_retrieved", {
-                "query": query[:200],
-                "num_chunks": len(chunks),
-                "chunk_ids": [c["id"] for c in chunks]
-            })
+            try:
+                await self._log_audit("rag_retrieved", {
+                    "query": query[:200],
+                    "num_chunks": len(chunks),
+                    "chunk_ids": [c["id"] for c in chunks] if chunks else []
+                })
+            except:
+                pass  # Don't fail if audit logging fails
         
-        # Synthesize answer
-        prompt = get_answer_synthesis_prompt(query, chunks)
+        # If KB is empty, use LLM with general IT helpdesk knowledge
+        if not chunks:
+            print(f"No KB chunks found for query: {query}. Using LLM general knowledge.")
+            prompt = f"""As an IT Helpdesk Assistant, answer the user's question about IT support. 
+Provide clear, step-by-step instructions based on IT best practices.
+
+User question: {query}
+
+If this is a common IT issue (like MFA setup, password reset, VPN issues), provide helpful instructions.
+If you're unsure or this requires specific company policies, acknowledge this and offer to create a support ticket.
+
+Provide a helpful answer:"""
+            
+            response = await self.llm.ainvoke([
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=prompt)
+            ])
+            
+            answer = response.content.strip()
+            
+            return {
+                "answer": answer,
+                "sources": [],
+                "intent": "knowledge",
+                "data_source": "llm_general_knowledge"
+            }
         
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt}
-        ]
-        
-        response = await self.llm.ainvoke([
-            HumanMessage(content=messages[1]["content"])
-        ])
-        
-        answer = response.content.strip()
-        
-        return {
-            "answer": answer,
-            "sources": [{"id": c["id"], "docId": c.get("docId"), "text": c["text"][:200]} for c in chunks],
-            "intent": "knowledge"
-        }
+        # Synthesize answer from KB chunks
+        try:
+            prompt = get_answer_synthesis_prompt(query, chunks)
+            
+            response = await self.llm.ainvoke([
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=prompt)
+            ])
+            
+            answer = response.content.strip()
+            
+            return {
+                "answer": answer,
+                "sources": [{"id": c["id"], "docId": c.get("docId"), "text": c["text"][:200]} for c in chunks],
+                "intent": "knowledge"
+            }
+        except Exception as e:
+            print(f"Error synthesizing answer from KB: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to generic LLM answer
+            prompt = f"""As an IT Helpdesk Assistant, answer the user's question about IT support. 
+Provide clear, step-by-step instructions based on IT best practices.
+
+User question: {query}
+
+If this is a common IT issue (like MFA setup, password reset, VPN issues), provide helpful instructions.
+If you're unsure or this requires specific company policies, acknowledge this and offer to create a support ticket.
+
+Provide a helpful answer:"""
+            
+            response = await self.llm.ainvoke([
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=prompt)
+            ])
+            
+            return {
+                "answer": response.content.strip(),
+                "sources": [],
+                "intent": "knowledge",
+                "data_source": "llm_fallback"
+            }
     
     async def handle_create_ticket(self, message: str, user_email: str) -> Dict[str, Any]:
         """Handle ticket creation."""
@@ -293,20 +415,51 @@ Ticket ID:"""
     
     async def invoke(self, message: str, user_email: str, session_id: str) -> Dict[str, Any]:
         """Main orchestrator entry point."""
-        # Classify intent
-        intent = await self.classify_intent(message, user_email)
-        
-        # Route to handler
-        if intent == "knowledge":
-            return await self.handle_knowledge(message, user_email)
-        elif intent == "create_ticket":
-            return await self.handle_create_ticket(message, user_email)
-        elif intent == "ticket_status":
-            return await self.handle_ticket_status(message, user_email)
-        elif intent == "password_reset":
-            return await self.handle_password_reset(message, user_email)
-        else:
-            return await self.handle_handoff(message, user_email, session_id)
+        try:
+            # Classify intent
+            intent = await self.classify_intent(message, user_email)
+            
+            # Route to handler
+            if intent == "knowledge":
+                return await self.handle_knowledge(message, user_email)
+            elif intent == "create_ticket":
+                return await self.handle_create_ticket(message, user_email)
+            elif intent == "ticket_status":
+                return await self.handle_ticket_status(message, user_email)
+            elif intent == "password_reset":
+                return await self.handle_password_reset(message, user_email)
+            else:
+                return await self.handle_handoff(message, user_email, session_id)
+        except Exception as e:
+            print(f"Error in orchestrator.invoke: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to generic LLM answer
+            try:
+                prompt = f"""As an IT Helpdesk Assistant, answer the user's question. Be helpful and professional.
+                
+User question: {message}
+
+Provide a helpful answer based on IT best practices. If you don't know the answer, acknowledge it and offer to create a support ticket."""
+                
+                response = await self.llm.ainvoke([
+                    SystemMessage(content=SYSTEM_PROMPT),
+                    HumanMessage(content=prompt)
+                ])
+                
+                return {
+                    "answer": response.content.strip(),
+                    "sources": [],
+                    "intent": "knowledge",
+                    "data_source": "llm_fallback"
+                }
+            except Exception as fallback_error:
+                print(f"Error in fallback LLM: {fallback_error}")
+                return {
+                    "answer": "I encountered an error processing your request. Please try again or contact support.",
+                    "intent": "handoff",
+                    "error": str(e)
+                }
     
     async def _log_audit(self, event: str, payload: Dict):
         """Log audit event."""

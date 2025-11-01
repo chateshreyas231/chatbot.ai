@@ -1,5 +1,11 @@
 """Jira client."""
-from jira import JIRA
+try:
+    from jira import JIRA
+    JIRA_AVAILABLE = True
+except ImportError:
+    JIRA_AVAILABLE = False
+    JIRA = None
+
 from typing import Dict, Optional
 import sys
 from pathlib import Path
@@ -19,6 +25,9 @@ class JiraClient:
         email: Optional[str] = None,
         api_token: Optional[str] = None
     ):
+        if not JIRA_AVAILABLE:
+            raise ImportError("Jira package not installed. Install with: pip install jira")
+        
         self.server_url = server_url or settings.jira_server_url
         self.email = email or settings.jira_email
         self.api_token = api_token or settings.jira_api_token

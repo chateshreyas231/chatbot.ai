@@ -21,11 +21,19 @@ from auth import (
 # Add packages to path
 import sys
 from pathlib import Path
-packages_path = Path(__file__).parent.parent.parent / "packages"
+
+# Get project root (apps/api -> parent -> parent)
+project_root = Path(__file__).parent.parent.parent
+packages_path = project_root / "packages"
 sys.path.insert(0, str(packages_path))
+sys.path.insert(0, str(project_root))
 
 from packages.orchestrator.graph import get_orchestrator, invoke_orchestrator
-from packages.clients import TicketSystemAdapter, MockTicketClient, ServiceNowClient, JiraClient
+from packages.clients import TicketSystemAdapter, MockTicketClient, ServiceNowClient
+try:
+    from packages.clients import JiraClient
+except ImportError:
+    JiraClient = None  # Optional dependency
 
 app = FastAPI(
     title="IT Helpdesk Copilot API",
@@ -94,7 +102,22 @@ async def shutdown():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    try:
+        # Test MongoDB connection
+        database = await get_database()
+        await database.command("ping")
+        return {
+            "status": "ok",
+            "mongodb": "connected",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "mongodb": "disconnected",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 # Authentication endpoints
@@ -149,9 +172,15 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 # Chat endpoint
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, current_user: User = Depends(get_current_user)):
-    """Main chat endpoint."""
+async def chat(request: ChatRequest):  # Removed auth requirement - anyone can chat
+    """Main chat endpoint - no authentication required."""
     database = await get_database()
+    
+    # Use guest user
+    guest_email = "guest@user.com"
+    current_user = await get_user_by_email(guest_email)
+    if current_user is None:
+        current_user = await create_user(email=guest_email, name="Guest User")
     
     # Get or create session
     if request.sessionId:

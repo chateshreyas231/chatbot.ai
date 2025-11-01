@@ -33,7 +33,9 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to create magic link')
+        const errorText = await response.text()
+        console.error('API Error:', response.status, errorText)
+        throw new Error(`Failed to create magic link: ${response.status} ${errorText}`)
       }
 
       const data = await response.json()
@@ -46,6 +48,8 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
           const authData = await verifyResponse.json()
           onLogin(authData.access_token)
         } else {
+          const errorText = await verifyResponse.text()
+          console.error('Verify Error:', verifyResponse.status, errorText)
           setTokenSent(true)
         }
       } else {
@@ -93,7 +97,7 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
             />
           </div>
 
