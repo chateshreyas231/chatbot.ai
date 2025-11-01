@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME:-it_helpdesk}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - USE_MOCK_INTEGRATIONS=${USE_MOCK_INTEGRATIONS:-true}
+      - N8N_WEBHOOK_TICKET_CREATED=${N8N_WEBHOOK_TICKET_CREATED:-http://n8n:5678/webhook/ticket-created}
+      - N8N_WEBHOOK_ESCALATE=${N8N_WEBHOOK_ESCALATE:-http://n8n:5678/webhook/escalate}
+    volumes:
+      - ../apps/api:/app
+      - ../packages:/packages
+    depends_on:
+      - n8n
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-admin}
+      - N8N_HOST=n8n
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+volumes:
+  n8n_data:
+

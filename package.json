@@ -1,0 +1,14 @@
+{
+  "name": "it-helpdesk-copilot",
+  "version": "1.0.0",
+  "description": "IT Helpdesk Copilot MVP with RAG, ticket creation, and agentic workflows",
+  "scripts": {
+    "dev:api": "cd apps/api && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:web": "cd apps/web && npm run dev",
+    "ingest": "cd apps/api && python -m packages.rag.ingestion"
+  },
+  "dependencies": {
+    "mongodb": "^6.20.0"
+  },
+  "devDependencies": {}
+}
